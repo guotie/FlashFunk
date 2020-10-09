@@ -1,17 +1,16 @@
 #![allow(dead_code, unused_imports, unused_must_use, unused_variables)]
 
+use std::fmt::Pointer;
+use std::thread;
+
 use chrono::Local;
-use flashfunk::app::{CtpbeeR, StrategyMessage};
 use flashfunk::constants::{Direction, Exchange, Offset, OrderType};
-use flashfunk::context::Context;
 use flashfunk::ctp::md_api::MdApi;
 use flashfunk::ctp::td_api::TdApi;
 use flashfunk::interface::Interface;
 use flashfunk::prelude::*;
 use flashfunk::structs::{CancelRequest, LoginForm, OrderData, OrderRequest, TickData};
 use flashfunk_codegen::Strategy;
-use std::fmt::Pointer;
-use std::thread;
 
 /// 價格
 struct Quote {
@@ -37,7 +36,6 @@ impl Quote {
     /// 計算盤口信息
     pub fn update_tick(&mut self, tick: &TickData) {
         if tick.ask_price(0) != self.ask && tick.bid_price(0) != self.bid {
-            println!("price changed at {}", tick.last_price - self.last_price);
             self.bid = tick.bid_price(0);
             self.ask = tick.ask_price(0);
             self.last_price = tick.last_price;
@@ -60,32 +58,61 @@ impl Ac for Strategy {
             direction: Direction::LONG,
             order_type: OrderType::LIMIT,
             volume: 1.0,
-            price: tick.last_price - 20.0,
+            price: tick.last_price + 1.0,
             offset: Offset::OPEN,
             reference: None,
         };
-        println!(
-            "行情 : {} 買一:{}  賣一:{} 買一量: {} 賣一量:{}",
-            tick.last_price,
-            tick.bid_price(0),
-            tick.ask_price(0),
-            tick.bid_volume(0),
-            tick.ask_volume(0)
-        );
-        println!("{:?}", ctx.get_active_ids());
+        // println!(
+        //     "行情 : {} 買一:{}  賣一:{} 買一量: {} 賣一量:{}",
+        //     tick.last_price,
+        //     tick.bid_price(0),
+        //     tick.ask_price(0),
+        //     tick.bid_volume(0),
+        //     tick.ask_volume(0)
+        // );
+        // print the active order's id
+        // println!("{:?}", ctx.get_active_ids().collect::<Vec<_>>());
+
+        // get the pos infomation
+        let pos = ctx.get_position("rb2101");
+
+        // send  a close position request
+        if pos.long_volume != 0.0 {
+            let req = OrderRequest {
+                symbol: "rb2101".to_string(),
+                exchange: Exchange::SHFE,
+                direction: Direction::SHORT,
+                order_type: OrderType::LIMIT,
+                volume: pos.long_volume.clone(),
+                price: tick.last_price - 2.0,
+                offset: Offset::CLOSETODAY,
+                reference: None,
+            };
+            // ctx.send(req);
+        }
         self.quote.update_tick(tick);
+
+        let acc = ctx.get_account();
+        println!("{:?}", acc);
+
+        // send order reuqest right now
         // ctx.send(req);
+
         // // 当我们需要同时引用上下文的不同状态时，我们可以使用Context::enter方法
-        ctx.enter(|sender, ctx| {
-            ctx.get_active_orders().iter().for_each(|f| {
-                let order = CancelRequest {
-                    order_id: f.orderid.clone().unwrap(),
-                    exchange: Exchange::SHFE,
-                    symbol: f.symbol.to_string(),
-                };
-                sender.send(order);
-            });
-        });
+        // ctx.enter(|sender, ctx| {
+        //     ctx.get_active_orders().for_each(|f| {
+        //         let order = CancelRequest {
+        //             order_id: f.orderid.clone().unwrap(),
+        //             exchange: Exchange::SHFE,
+        //             symbol: f.symbol.to_string(),
+        //         };
+        //         sender.send(order);
+        //     });
+        // });
+    }
+
+    fn on_order(&mut self, order: &OrderData, ctx: &mut Context) {
+        // println!("{:?}", order);
     }
 }
 
@@ -102,7 +129,7 @@ fn main() {
     let strategy_1 = Strategy {
         quote: Quote::new(),
     };
-    CtpbeeR::new("ctpbee")
+    CtpbeeR::builder("ctpbee")
         .strategies(vec![strategy_1.into_str()])
         .id("name")
         .pwd("id")

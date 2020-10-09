@@ -6,22 +6,26 @@ use std::cmp::max;
 use std::ffi::{CStr, CString};
 use std::os::raw::{c_char, c_int};
 
-use chrono::NaiveDateTime;
+use chrono::{Date, NaiveDateTime, Utc};
 
-use crate::app::{CtpbeeR, TdApiMessage};
 use crate::constants::{Direction, Exchange, Offset, OrderType, Status};
 use crate::ctp::sys::*;
 use crate::interface::Interface;
 use crate::structs::{
-    CancelRequest, ContractData, LoginForm, OrderData, OrderMeta, OrderRequest, TradeData,
+    AccountData, CancelRequest, ContractData, LoginForm, OrderData, OrderRequest, PositionData,
+    TradeData,
 };
+use crate::types::message::TdApiMessage;
 use crate::util::blocker::Blocker;
 use crate::util::channel::GroupSender;
+use crate::util::hash::HashMap;
 use bitflags::_core::sync::atomic::AtomicI32;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
-/// et the api instance  for the TdCallApi
+const POS_LONG: u8 = THOST_FTDC_PD_Long as u8;
+const POS_SHORT: u8 = THOST_FTDC_PD_Short as u8;
+
 unsafe fn get_trader_spi<'a>(spi: *mut c_void) -> &'a mut dyn TdCallApi {
     &mut **(spi as *mut *mut dyn TdCallApi)
 }
@@ -2693,6 +2697,7 @@ pub struct CallDataCollector {
     connect_status: bool,
     sender: GroupSender<TdApiMessage>,
     blocker: Option<TdApiBlocker>,
+    pos: HashMap<Cow<'static, str>, PositionData>,
 }
 
 struct TdApiBlockerInner {
@@ -2702,6 +2707,7 @@ struct TdApiBlockerInner {
     step2: Blocker,
     step3: Blocker,
     step4: Blocker,
+    step5: Blocker,
 }
 
 struct TdApiBlocker(Arc<TdApiBlockerInner>);
@@ -2721,6 +2727,7 @@ impl TdApiBlocker {
             step2: Default::default(),
             step3: Default::default(),
             step4: Default::default(),
+            step5: Default::default(),
         }))
     }
 }
@@ -2794,13 +2801,6 @@ impl TdCallApi for CallDataCollector {
         nRequestID: c_int,
         bIsLast: bool,
     ) {
-        match get_rsp_info(pRspInfo) {
-            Ok(t) => {}
-            Err(e) => {
-                // println!(">>> Order failed, id: {} msg: {}", e.id, e.msg);
-            }
-        }
-        if bIsLast {}
     }
 
     fn on_rsp_order_action(
@@ -2984,12 +2984,79 @@ impl TdCallApi for CallDataCollector {
         }
 
         if bIsLast {
-            self.blocker.take().unwrap().0.step4.unblock();
+            self.blocker.as_ref().unwrap().0.step4.unblock();
+        }
+    }
+
+    fn on_rsp_qry_trading_account(
+        &mut self,
+        pTradingAccount: *mut CThostFtdcTradingAccountField,
+        pRspInfo: *mut CThostFtdcRspInfoField,
+        nRequestID: c_int,
+        bIsLast: bool,
+    ) {
+        unsafe {
+            match get_rsp_info(pRspInfo) {
+                Ok(t) => {
+                    let account_data = AccountData {
+                        accountid: slice_to_string(&(*pTradingAccount).AccountID),
+                        balance: (*pTradingAccount).Balance,
+                        frozen: (*pTradingAccount).FrozenMargin
+                            + (*pTradingAccount).FrozenCash
+                            + (*pTradingAccount).FrozenCommission,
+                        date: Utc::today(),
+                    };
+                    self.sender.send_all(account_data);
+                }
+                Err(e) => {
+                    println!(">>> Account Query Err, id: {} msg: {}", e.id, e.msg);
+                }
+            };
+        }
+        if self.blocker.is_some() {
+            self.blocker.take().unwrap().0.step5.unblock();
+        }
+    }
+
+    fn on_rsp_qry_investor_position(
+        &mut self,
+        pInvestorPosition: *mut CThostFtdcInvestorPositionField,
+        pRspInfo: *mut CThostFtdcRspInfoField,
+        nRequestID: c_int,
+        bIsLast: bool,
+    ) {
+        match get_rsp_info(pRspInfo) {
+            Ok(t) => {
+                unsafe {
+                    let symbol = slice_to_string(&(*pInvestorPosition).InstrumentID);
+                    let open_cost = (*pInvestorPosition).OpenCost;
+                    let direction = Direction::from((*pInvestorPosition).PosiDirection);
+                    let td_pos = (*pInvestorPosition).TodayPosition;
+                    let volume = (*pInvestorPosition).Position;
+                    let profit = (*pInvestorPosition).PositionProfit;
+                    let frozen = (*pInvestorPosition).ShortFrozen + (*pInvestorPosition).LongFrozen;
+                    let pos = self
+                        .pos
+                        .entry(Cow::from(symbol.clone()))
+                        .or_insert_with(|| match direction {
+                            Direction::SHORT => PositionData::new_with_short(&symbol),
+                            Direction::LONG => PositionData::new_with_long(&symbol),
+                            _ => panic!("bad direction"),
+                        });
+                    // todo: collect the position info and send it to the core
+                    // cal logic should be provide
+                }
+                if bIsLast {
+                    self.pos
+                        .iter()
+                        .for_each(|(k, v)| self.sender.send_all(v.to_owned()));
+                    self.pos.clear();
+                }
+            }
+            Err(e) => {}
         }
     }
 }
-
-unsafe impl Send for TdApi {}
 
 fn get_order_type(order: OrderType) -> c_char {
     match order {
@@ -3078,21 +3145,6 @@ impl From<i8> for OrderType {
     }
 }
 
-// impl From<i8> for Status {
-//     fn from(i: i8) -> Self {
-//         match i as u8 {
-//             THOST_FTDC_OAS_Submitted => Self::SUBMITTING,
-//             THOST_FTDC_OAS_Accepted => Self::SUBMITTING,
-//             THOST_FTDC_OAS_Rejected => Self::REJECTED,
-//             THOST_FTDC_OST_NoTradeQueueing => Status::NOTTRADED,
-//             THOST_FTDC_OST_PartTradedQueueing => Status::PARTTRADED,
-//             THOST_FTDC_OST_AllTraded => Status::ALLTRADED,
-//             THOST_FTDC_OST_Canceled => Status::CANCELLED,
-//             _ => panic!("ctp do not support this status"),
-//         }
-//     }
-// }
-
 impl From<i8> for Status {
     fn from(i: i8) -> Self {
         match i as u8 {
@@ -3113,7 +3165,9 @@ impl From<i8> for Direction {
         match i as u8 {
             THOST_FTDC_D_Buy => Self::LONG,
             THOST_FTDC_D_Sell => Self::SHORT,
-            _ => panic!("ctp do not support other direction"),
+            POS_LONG => Self::LONG,
+            POS_SHORT => Self::SHORT,
+            _ => panic!("ctp do not support other direction {}", i),
         }
     }
 }
@@ -3208,6 +3262,7 @@ impl TdApi {
             connect_status: false,
             sender,
             blocker: Some(blocker),
+            pos: Default::default(),
         };
         // rust object
         let trait_object_box: Box<Box<dyn TdCallApi>> = Box::new(Box::new(collector));
@@ -3234,6 +3289,34 @@ impl TdApi {
         };
         unsafe {
             RustCtpCallReqSettlementInfoConfirm(
+                self.trader_api,
+                Box::into_raw(Box::new(req)),
+                self.request_id,
+            );
+        }
+    }
+
+    pub fn req_account(&mut self) {
+        self.request_id += 1;
+        unsafe {
+            RustCtpCallReqQryTradingAccount(
+                self.trader_api,
+                Box::into_raw(Box::new(CThostFtdcQryTradingAccountField::default())),
+                self.request_id,
+            );
+        }
+    }
+
+    pub fn req_position(&mut self) {
+        self.request_id += 1;
+        let login_info = self.login_info.as_ref().unwrap();
+        unsafe {
+            let req = CThostFtdcQryInvestorPositionField {
+                BrokerID: login_info._broke_id().to_c_slice(),
+                InvestorID: login_info._user_id().to_c_slice(),
+                ..CThostFtdcQryInvestorPositionField::default()
+            };
+            RustCtpCallReqQryInvestorPosition(
                 self.trader_api,
                 Box::into_raw(Box::new(req)),
                 self.request_id,
@@ -3350,7 +3433,15 @@ impl Interface for TdApi {
         self.req_settle();
 
         self.req_instrument();
+        self.req_position();
+
+        //阻塞等待合約查詢完畢
         blocker.0.step4.block();
+        // println!("第四步解封");
+
+        self.req_account();
+        // 阻塞等待賬戶查詢完畢
+        blocker.0.step5.block();
     }
 
     fn subscribe(&mut self) {
