@@ -57,10 +57,10 @@ impl Account {
         let _ = iter.next();
         let size: f64 = iter.next().expect("can not find size")
             .parse().expect("size should be f64");
-        let margin_ratio: f64 = iter.next().expect("can not find margin_ratio")
-            .parse().expect("margin_ratio should be f64");
-        let commission_ratio: f64 = iter.next().expect("can not find commission_ratio")
-            .parse().expect("commission_ratio should be f64");
+        // let margin_ratio: f64 = iter.next().expect("can not find margin_ratio")
+        //     .parse().expect("margin_ratio should be f64");
+        // let commission_ratio: f64 = iter.next().expect("can not find commission_ratio")
+        //     .parse().expect("commission_ratio should be f64");
         let mut config_size_map: HashMap<String, f64> = HashMap::new();
         let mut config_commission_ratio_map: HashMap<String, f64> = HashMap::new();
         let mut config_margin_ratio_map: HashMap<String, f64> = HashMap::new();

@@ -129,9 +129,19 @@ static HANDLE: Lazy<UnboundedSender<SqlQueryMessage>> = Lazy::new(|| {
     let (tx, mut rx) = unbounded::<SqlQueryMessage>();
 
     std::thread::spawn(move || {
-        tokio::runtime::Builder::new()
-            .basic_scheduler()
-            .enable_all()
+        // tokio::runtime::Builder::new()
+        //     .basic_scheduler()
+        //     .enable_all()
+        //     .build()
+        //     .unwrap()
+        //     .block_on(async move {
+        //         while let Some(msg) = rx.next().await {
+        //             let mut handle = msg.query;
+        //             let sender = msg.tx;
+        //             handle.handle(&pool, sender).await;
+        //         }
+        //     })
+        tokio::runtime::Builder::new_current_thread()
             .build()
             .unwrap()
             .block_on(async move {

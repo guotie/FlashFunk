@@ -39,10 +39,10 @@ impl Interface for MockMdApi {
     type Message = MdApiMessage;
 
     fn new(
-        id: impl Into<Vec<u8>>,
-        pwd: impl Into<Vec<u8>>,
+        _id: impl Into<Vec<u8>>,
+        _pwd: impl Into<Vec<u8>>,
         symbols: Vec<&'static str>,
-        req: &LoginForm,
+        _req: &LoginForm,
         sender: GroupSender<Self::Message>,
     ) -> Self {
         MockMdApi {
@@ -215,11 +215,11 @@ impl MockTdApi {
             let order_price: f64 = order.price;
             let order_dir: Direction = order.direction.unwrap();
             let order_vol: i32 = order.volume as i32;
-            let mut trade_price: f64 = 0.0;
-            let mut trade_vol: i32 = 0;
+            let trade_price: f64;
+            let trade_vol: i32;
 
             let queue_num: i32 = self.queue_num_map.get(&id).unwrap().clone();
-            let mut new_queue_num_head: i32 = 0;
+            let mut new_queue_num_head: i32;
         
             let current_tick: &TickData = &self.current_tick;
             let old_tick: &TickData = &self.old_tick;
@@ -259,11 +259,11 @@ impl MockTdApi {
                         self.queue_num_map.insert(id.clone(), new_queue_num_head);
                         continue;
                     }
-                    else{
+                    // else{
                         // 计算全成还是部成
                         trade_vol = 1-new_queue_num_head;
                         trade_price = order_price;
-                    }
+                    // }
                 }
                 else{
                     // 不应该出现这种情况
@@ -394,7 +394,7 @@ impl Interface for MockTdApi {
     }
 
     /// 取消订阅行情
-    fn unsubscribe(&mut self, symbol: String) {
+    fn unsubscribe(&mut self, _symbol: String) {
         unimplemented!()
     }
 

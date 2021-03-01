@@ -1,5 +1,5 @@
 use chrono::{NaiveTime, Local, Timelike};
-use std::process::{Command, Child};
+use std::process::Command;
 use std::thread::sleep;
 use std::time::Duration;
 
@@ -36,14 +36,20 @@ impl Timer {
             for t in self.rest.iter() {
                 if t.minute().eq(&current.minute()) && t.second().eq(&current.second()) && alive {
                     println!("===> Time is: {}, process should be kill", current);
-                    n.kill();
+                    match n.kill() {
+                        Ok(_) => break,
+                        Err(err) => println!("kill timer failed: {}", err)
+                    }
                 }
             }
 
             for s in self.rost.iter() {
                 if s.minute().eq(&current.minute()) && s.second().eq(&current.second()) {
                     if alive {
-                        n.kill();
+                        match n.kill() {
+                            Ok(_) => break,
+                            Err(err) => println!("kill timer failed: {}", err)
+                        }
                     }
                     n = command.spawn().expect("Process run failed, please check your code or command");
                     println!("===> Time is: {}, process should be start", current);

@@ -130,11 +130,11 @@ impl StrategyWorker {
                         ctx.update_position_by_pos(data);
                         self.st.on_position(data, &mut ctx);
                     }
-                    TdApiMessage::ContractData(ref data) => {}
+                    TdApiMessage::ContractData(ref _data) => {}
                     TdApiMessage::ExtraOrder(ref data) => {
                         ctx.add_order(data.deref().clone());
                     }
-                    TdApiMessage::ExtraTrade(ref data) => {}
+                    TdApiMessage::ExtraTrade(ref _data) => {}
                     TdApiMessage::ContractVec(ref data) => {
                         for contract in data.iter() {
                             ctx.1
